@@ -1,0 +1,384 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name for release'
+        required: true
+        default: 'v2.0.0'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Get tag name
+      id: tag
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "tag_name=${{ github.event.inputs.tag_name }}" >> $GITHUB_OUTPUT
+        else
+          echo "tag_name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Create Release Assets
+      run: |
+        # Copy main script and rename
+        cp find_urls.sh url-finder
+        chmod +x url-finder
+        
+        # Create permanent installer
+        cat > install.sh << 'EOF'
+        #!/bin/bash
+        # URL Finder CLI - Permanent Installer
+        
+        set -e
+        
+        REPO="${{ github.repository }}"
+        INSTALL_DIR="$HOME/.local/bin"
+        SCRIPT_NAME="url-finder"
+        
+        echo "🔍 URL Finder CLI - Installing..."
+        echo "=================================="
+        
+        # Create install directory
+        mkdir -p "$INSTALL_DIR"
+        
+        # Download latest release
+        echo "📥 Downloading from GitHub releases..."
+        if command -v curl >/dev/null 2>&1; then
+            curl -fsSL "https://github.com/$REPO/releases/latest/download/url-finder" \
+                 -o "$INSTALL_DIR/$SCRIPT_NAME"
+        elif command -v wget >/dev/null 2>&1; then
+            wget -q "https://github.com/$REPO/releases/latest/download/url-finder" \
+                 -O "$INSTALL_DIR/$SCRIPT_NAME"
+        else
+            echo "❌ Error: curl or wget is required"
+            exit 1
+        fi
+        
+        # Make executable
+        chmod +x "$INSTALL_DIR/$SCRIPT_NAME"
+        
+        # Add to PATH if not already there
+        SHELL_RC=""
+        if [ -n "$ZSH_VERSION" ]; then
+            SHELL_RC="$HOME/.zshrc"
+        elif [ -n "$BASH_VERSION" ]; then
+            SHELL_RC="$HOME/.bashrc"
+        else
+            SHELL_RC="$HOME/.profile"
+        fi
+        
+        if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]] && [ -f "$SHELL_RC" ]; then
+            echo "" >> "$SHELL_RC"
+            echo "# Added by URL Finder CLI installer" >> "$SHELL_RC"
+            echo "export PATH=\"\$PATH:$INSTALL_DIR\"" >> "$SHELL_RC"
+            echo "📝 Added $INSTALL_DIR to PATH in $SHELL_RC"
+        fi
+        
+        echo ""
+        echo "✅ Installation complete!"
+        echo "🚀 Run 'url-finder' from anywhere (restart terminal if needed)"
+        echo "   Or run directly: $INSTALL_DIR/$SCRIPT_NAME"
+        echo ""
+        
+        # Ask if user wants to run now
+        read -p "🎯 Run URL Finder now? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            echo "🔍 Starting URL Finder..."
+            exec "$INSTALL_DIR/$SCRIPT_NAME"
+        fi
+        EOF
+        chmod +x install.sh
+        
+        # Create run-once script
+        cat > run-once.sh << 'EOF'
+        #!/bin/bash
+        # URL Finder CLI - Run Once (No Installation)
+        
+        set -e
+        
+        REPO="${{ github.repository }}"
+        TEMP_DIR=$(mktemp -d)
+        SCRIPT_NAME="url-finder"
+        
+        echo "🔍 URL Finder CLI - Temporary Run"
+        echo "================================="
+        echo "📥 Downloading latest version..."
+        
+        # Download to temp directory
+        if command -v curl >/dev/null 2>&1; then
+            curl -fsSL "https://github.com/$REPO/releases/latest/download/url-finder" \
+                 -o "$TEMP_DIR/$SCRIPT_NAME"
+        elif command -v wget >/dev/null 2>&1; then
+            wget -q "https://github.com/$REPO/releases/latest/download/url-finder" \
+                 -O "$TEMP_DIR/$SCRIPT_NAME"
+        else
+            echo "❌ Error: curl or wget is required"
+            exit 1
+        fi
+        
+        chmod +x "$TEMP_DIR/$SCRIPT_NAME"
+        
+        echo "🚀 Starting URL Finder..."
+        echo ""
+        
+        # Run the script
+        exec "$TEMP_DIR/$SCRIPT_NAME"
+        EOF
+        chmod +x run-once.sh
+        
+        # Create Windows batch installer
+        cat > install.bat << 'EOF'
+        @echo off
+        setlocal enabledelayedexpansion
+        
+        echo 🔍 URL Finder CLI - Windows Installer
+        echo =====================================
+        
+        set "INSTALL_DIR=%USERPROFILE%\.local\bin"
+        set "REPO=${{ github.repository }}"
+        
+        echo 📁 Creating installation directory...
+        if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
+        
+        echo 📥 Downloading URL Finder CLI...
+        powershell -Command "& {Invoke-WebRequest -Uri 'https://github.com/!REPO!/releases/latest/download/url-finder' -OutFile '%INSTALL_DIR%\url-finder.sh'}"
+        
+        if %ERRORLEVEL% neq 0 (
+            echo ❌ Download failed! Please check your internet connection.
+            pause
+            exit /b 1
+        )
+        
+        echo ✅ Installation complete!
+        echo 🚀 Run with: bash "%INSTALL_DIR%\url-finder.sh"
+        echo 📝 Note: Requires Git Bash, WSL, or similar bash environment
+        echo.
+        pause
+        EOF
+        
+        # Create macOS app bundle structure
+        mkdir -p URLFinder.app/Contents/{MacOS,Resources}
+        
+        # Create Info.plist
+        cat > URLFinder.app/Contents/Info.plist << 'EOF'
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>CFBundleExecutable</key>
+            <string>url-finder-launcher</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.urlfinderli.app</string>
+            <key>CFBundleName</key>
+            <string>URL Finder</string>
+            <key>CFBundleDisplayName</key>
+            <string>URL Finder CLI</string>
+            <key>CFBundleVersion</key>
+            <string>${{ steps.tag.outputs.tag_name }}</string>
+            <key>CFBundleShortVersionString</key>
+            <string>${{ steps.tag.outputs.tag_name }}</string>
+            <key>CFBundleInfoDictionaryVersion</key>
+            <string>6.0</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>10.9</string>
+            <key>CFBundleIconFile</key>
+            <string>icon</string>
+            <key>LSUIElement</key>
+            <false/>
+            <key>CFBundleDocumentTypes</key>
+            <array>
+                <dict>
+                    <key>CFBundleTypeRole</key>
+                    <string>Viewer</string>
+                    <key>LSItemContentTypes</key>
+                    <array>
+                        <string>public.folder</string>
+                    </array>
+                </dict>
+            </array>
+        </dict>
+        </plist>
+        EOF
+        
+        # Create launcher script for macOS app
+        cat > URLFinder.app/Contents/MacOS/url-finder-launcher << 'EOF'
+        #!/bin/bash
+        # URL Finder macOS App Launcher
+        
+        BUNDLE_DIR="$(dirname "$0")/.."
+        SCRIPT_PATH="$BUNDLE_DIR/Resources/url-finder.sh"
+        
+        # Copy the main script to Resources if it doesn't exist
+        if [ ! -f "$SCRIPT_PATH" ]; then
+            TEMP_DIR=$(mktemp -d)
+            curl -fsSL "https://github.com/${{ github.repository }}/releases/latest/download/url-finder" \
+                 -o "$SCRIPT_PATH"
+            chmod +x "$SCRIPT_PATH"
+        fi
+        
+        # Open Terminal and run the script
+        osascript << 'APPLESCRIPT'
+        tell application "Terminal"
+            activate
+            do script "clear && '" & POSIX path of (path to me) & "../Resources/url-finder.sh'"
+        end tell
+        APPLESCRIPT
+        EOF
+        chmod +x URLFinder.app/Contents/MacOS/url-finder-launcher
+        
+        # Copy main script to app bundle
+        cp url-finder URLFinder.app/Contents/Resources/url-finder.sh
+        
+        # Create app icon (simple text-based)
+        echo "🔍" > URLFinder.app/Contents/Resources/icon.txt
+        
+        # Create zip of app bundle
+        zip -r URLFinder.app.zip URLFinder.app/
+        
+        # Create quick install one-liner script
+        cat > quick-install.sh << 'EOF'
+        #!/bin/bash
+        # URL Finder CLI - One-Line Quick Install
+        bash <(curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install.sh)
+        EOF
+        chmod +x quick-install.sh
+        
+        # Create update script
+        cat > update.sh << 'EOF'
+        #!/bin/bash
+        # URL Finder CLI - Update Script
+        
+        INSTALL_DIR="$HOME/.local/bin"
+        SCRIPT_NAME="url-finder"
+        REPO="${{ github.repository }}"
+        
+        if [ ! -f "$INSTALL_DIR/$SCRIPT_NAME" ]; then
+            echo "❌ URL Finder not found. Run install.sh first."
+            exit 1
+        fi
+        
+        echo "🔄 Updating URL Finder CLI..."
+        
+        # Download latest version
+        curl -fsSL "https://github.com/$REPO/releases/latest/download/url-finder" \
+             -o "$INSTALL_DIR/$SCRIPT_NAME.new"
+        
+        # Replace old version
+        mv "$INSTALL_DIR/$SCRIPT_NAME.new" "$INSTALL_DIR/$SCRIPT_NAME"
+        chmod +x "$INSTALL_DIR/$SCRIPT_NAME"
+        
+        echo "✅ Updated to latest version!"
+        EOF
+        chmod +x update.sh
+    
+    - name: Generate Release Notes
+      id: release_notes
+      run: |
+        cat > release_notes.md << EOF
+        ## 🔍 URL Finder CLI ${{ steps.tag.outputs.tag_name }}
+        
+        **A beautiful CLI tool for discovering URLs in source code repositories with ASCII art interface, GitHub integration, and smart filtering.**
+        
+        ### 🚀 One-Click Installation Options:
+        
+        #### **Quick Install (Recommended):**
+        \`\`\`bash
+        curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install.sh | bash
+        \`\`\`
+        
+        #### **Run Once (No Installation):**
+        \`\`\`bash
+        curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/run-once.sh | bash
+        \`\`\`
+        
+        #### **Update Existing Installation:**
+        \`\`\`bash
+        curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/update.sh | bash
+        \`\`\`
+        
+        ### 📦 Download Assets:
+        
+        | Asset | Description | Platform |
+        |-------|-------------|----------|
+        | \`url-finder\` | Main script file | All |
+        | \`install.sh\` | Permanent installer | macOS/Linux |
+        | \`run-once.sh\` | Run without installing | macOS/Linux |
+        | \`update.sh\` | Update existing installation | macOS/Linux |
+        | \`install.bat\` | Windows installer | Windows |
+        | \`URLFinder.app.zip\` | macOS application bundle | macOS |
+        | \`quick-install.sh\` | Alternative installer | macOS/Linux |
+        
+        ### 🎯 Features:
+        - 🎨 **Beautiful ASCII Art Interface** - Professional terminal UI
+        - 📄 **4-Page Navigation** - Clean flow with arrow key navigation  
+        - 🐙 **GitHub Integration** - Clone and scan remote repositories
+        - 📁 **Local Directory Scanning** - Analyze your projects
+        - 🎯 **Smart Filtering** - Ignores dependencies and build files
+        - 🔗 **Comprehensive Detection** - Finds HTTP(S), FTP, and www URLs
+        - 🌈 **Color-Coded Output** - Easy-to-read results with icons
+        - 🖥️ **Terminal Title Control** - Dynamic title bar updates
+        
+        ### 🛠️ Requirements:
+        - Bash 3.0+ (macOS/Linux compatible)
+        - Git (optional, for GitHub repository scanning)
+        - Terminal with Unicode support
+        
+        ### 📖 Usage:
+        \`\`\`bash
+        # After installation
+        url-finder
+        
+        # Or run directly
+        ./url-finder
+        
+        # Show help
+        url-finder --help
+        \`\`\`
+        
+        ### 🎮 Navigation:
+        - **↓ (Down Arrow)** - Navigate between pages
+        - **q** - Quit at any time  
+        - **1** - Select local directory scanning
+        - **2** - Select GitHub repository scanning
+        
+        ---
+        
+        **⭐ Star this repository if you find it useful!**
+        
+        Made with ❤️ for the developer community
+        EOF
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.tag.outputs.tag_name }}
+        name: 🔍 URL Finder CLI ${{ steps.tag.outputs.tag_name }}
+        body_path: release_notes.md
+        files: |
+          url-finder
+          install.sh
+          run-once.sh
+          install.bat
+          update.sh
+          quick-install.sh
+          URLFinder.app.zip
+        draft: false
+        prerelease: false
+        make_latest: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
