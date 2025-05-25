@@ -367,7 +367,7 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ steps.tag.outputs.tag_name }}
-        name: 🔍 URL Finder CLI ${{ steps.tag.outputs.tag_name }}
+        name: ${{ steps.tag.outputs.tag_name }}
         body_path: release_notes.md
         files: |
           url-finder
