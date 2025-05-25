@@ -2,7 +2,7 @@
 
 A beautiful, modern CLI tool for discovering URLs in source code repositories and local directories. Built with love for developers and security researchers.
 
-![URL Finder Demo](demo.png)
+![URL Finder Demo](/assets/demo.png)
 
 ## ✨ Features
 
